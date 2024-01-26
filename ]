@@ -49,13 +49,10 @@ type Raft struct {
 
 func (r *Raft) Start() {
 	r.l.Info("Starting raft node")
-	r.startGrpcServer()
-
 }
 
 // Starts GrpcServer in address config.Address
 func (r *Raft) startGrpcServer() {
-	r.l.Info("Starting grpc Server")
 	lis, err := net.Listen("tcp", r.config.Address)
 
 	if err != nil {
@@ -65,7 +62,7 @@ func (r *Raft) startGrpcServer() {
 	grpcServer := grpc.NewServer()
 
 	rpc.RegisterRaftRpcServiceServer(grpcServer, r)
-	go grpcServer.Serve(lis)
+	grpcServer.Serve(lis)
 }
 
 // Increase raft.ElectionTickElasped if the

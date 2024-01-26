@@ -12,6 +12,7 @@ func main() {
 		HeartbeatTick: 1,
 	})
 
+	raftServer.Start()
 	ticker := time.NewTicker(time.Second)
 	for {
 		select {
