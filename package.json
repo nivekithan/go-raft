@@ -1,0 +1,13 @@
+{
+  "name": "go-raft",
+  "version": "1.0.0",
+  "description": "",
+  "main": "index.js",
+  "scripts": {
+    "dev": "go run cmd/raft.go",
+    "proto:gen": "protoc -I ./rpc --go_out . ./rpc/raft.proto"
+  },
+  "keywords": [],
+  "author": "",
+  "license": "ISC"
+}
