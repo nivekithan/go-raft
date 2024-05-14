@@ -5,11 +5,12 @@ import (
 )
 
 func main() {
+
 	defaultRaftTransport := raft.NewRpcRaftTransportClient(raft.RpcRaftTransportConfig{
-		Peers: make(map[int]string),
+		Peers: map[int]string{2: ":9002"},
 	})
 
-	raft := raft.NewRaft(raft.RaftConfig{
+	raftServer := raft.NewRaft(raft.RaftConfig{
 		Id:                   1,
 		CurrentTerm:          0,
 		VotedFor:             -1,
@@ -17,7 +18,21 @@ func main() {
 		TransporterClient:    defaultRaftTransport,
 	})
 
-	raft.Start()
+	raftServer.Start()
+
+	defaultRaftTransport = raft.NewRpcRaftTransportClient(raft.RpcRaftTransportConfig{
+		Peers: map[int]string{1: ":9001"},
+	})
+
+	raftServer = raft.NewRaft(raft.RaftConfig{
+		Id:                   2,
+		CurrentTerm:          0,
+		VotedFor:             -1,
+		MinElectionTimeoutMs: 150,
+		TransporterClient:    defaultRaftTransport,
+	})
+
+	raftServer.Start()
 
 	for {
 

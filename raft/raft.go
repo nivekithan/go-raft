@@ -4,6 +4,7 @@ import (
 	"log/slog"
 	"math/rand"
 	"os"
+	"sync"
 	"time"
 
 	"github.com/nivekithan/go-raft/utils"
@@ -45,6 +46,7 @@ type Raft struct {
 	// Fields not related to raft algorithm
 	l                 *slog.Logger
 	transporterClient TransportClient
+	mu                sync.Mutex
 }
 
 type RaftConfig struct {
@@ -66,13 +68,22 @@ func NewRaft(config RaftConfig) *Raft {
 		id:                 config.Id,
 		currentState:       Follower,
 		electionTimemoutMs: pseudoRandomElectionTimeout,
-		l:                  slog.New(slog.NewTextHandler(os.Stdout, nil)).With("id", config.Id),
-		transporterClient:  config.TransporterClient,
+
+		l: slog.New(slog.NewTextHandler(
+			os.Stdout,
+			&slog.HandlerOptions{
+				Level: slog.LevelDebug,
+			},
+		)).With("id", config.Id),
+
+		transporterClient: config.TransporterClient,
 	}
 }
 
 func (r *Raft) Start() {
 	utils.Invariant(r.l, r.currentState == Follower, "Call Start() only on a Follower")
+
+	go r.startListenRpc()
 
 	if err := r.transporterClient.Connect(); err != nil {
 		r.l.Error(err.Error())
@@ -94,6 +105,27 @@ func (r *Raft) startElectionTimer() {
 		// Timer has passed start the election
 		r.l.Info("Starting election")
 
+		r.mu.Lock()
+		for _, peerId := range r.transporterClient.Peers() {
+			r.l.Debug("Sending RequestVoteArgs to peer", "peerId", peerId)
+
+			go func(peerId int, currentTerm int, candidateId int) {
+				err := r.transporterClient.SendRequestVote(
+					peerId,
+					RequestVoteArgs{
+						Term:        currentTerm,
+						CandidateId: candidateId,
+					},
+					new(RequestVoteReply),
+				)
+
+				if err != nil {
+					r.l.Error(err.Error())
+				}
+			}(peerId, r.currentTerm, r.id)
+
+		}
+		r.mu.Unlock()
 		return
 	}
 
