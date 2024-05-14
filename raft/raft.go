@@ -39,20 +39,20 @@ type Raft struct {
 	// Other variables
 	currentState       RaftState
 	id                 int
-	peerIds            []int
 	electionTimemoutMs int
 	electionResetEvent time.Time
 
 	// Fields not related to raft algorithm
-	l *slog.Logger
+	l                 *slog.Logger
+	transporterClient TransportClient
 }
 
 type RaftConfig struct {
 	Id                   int
-	PeerIds              []int
 	CurrentTerm          int
 	VotedFor             int
 	MinElectionTimeoutMs int
+	TransporterClient    TransportClient
 }
 
 func NewRaft(config RaftConfig) *Raft {
@@ -64,16 +64,19 @@ func NewRaft(config RaftConfig) *Raft {
 		currentTerm:        config.CurrentTerm,
 		votedFor:           config.VotedFor,
 		id:                 config.Id,
-		peerIds:            config.PeerIds,
 		currentState:       Follower,
 		electionTimemoutMs: pseudoRandomElectionTimeout,
 		l:                  slog.New(slog.NewTextHandler(os.Stdout, nil)).With("id", config.Id),
+		transporterClient:  config.TransporterClient,
 	}
 }
 
 func (r *Raft) Start() {
 	utils.Invariant(r.l, r.currentState == Follower, "Call Start() only on a Follower")
 
+	if err := r.transporterClient.Connect(); err != nil {
+		r.l.Error(err.Error())
+	}
 	// Start the election timer
 	go r.startElectionTimer()
 
@@ -87,13 +90,13 @@ func (r *Raft) startElectionTimer() {
 	go timer.start()
 
 	for range response {
-		// Timer has passed start the election
 
+		// Timer has passed start the election
 		r.l.Info("Starting election")
 
 		return
 	}
 
-	// Response channel has been closed so election timer has been stopped somehow
+	// Response channel has been closed so election timer has been stopped
 	return
 }
