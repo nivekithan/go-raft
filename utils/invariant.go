@@ -1,7 +1,13 @@
 package utils
 
-func Invariant(isPassed bool, message string) {
+import "log/slog"
+
+func Invariant(l *slog.Logger, isPassed bool, message string) {
+
+	if l == nil {
+		l = slog.Default()
+	}
 	if !isPassed {
-		panic(message)
+		l.Error(message)
 	}
 }

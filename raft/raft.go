@@ -1,8 +1,9 @@
 package raft
 
 import (
-	"fmt"
+	"log/slog"
 	"math/rand"
+	"os"
 	"time"
 
 	"github.com/nivekithan/go-raft/utils"
@@ -41,6 +42,9 @@ type Raft struct {
 	peerIds            []int
 	electionTimemoutMs int
 	electionResetEvent time.Time
+
+	// Fields not related to raft algorithm
+	l *slog.Logger
 }
 
 type RaftConfig struct {
@@ -52,7 +56,7 @@ type RaftConfig struct {
 }
 
 func NewRaft(config RaftConfig) *Raft {
-	utils.Invariant(config.MinElectionTimeoutMs > 0, "MinElectionTimeoutMs should be greater than 0")
+	utils.Invariant(nil, config.MinElectionTimeoutMs > 0, "MinElectionTimeoutMs should be greater than 0")
 
 	pseudoRandomElectionTimeout := rand.Intn(config.MinElectionTimeoutMs) + config.MinElectionTimeoutMs
 
@@ -63,11 +67,12 @@ func NewRaft(config RaftConfig) *Raft {
 		peerIds:            config.PeerIds,
 		currentState:       Follower,
 		electionTimemoutMs: pseudoRandomElectionTimeout,
+		l:                  slog.New(slog.NewTextHandler(os.Stdout, nil)).With("id", config.Id),
 	}
 }
 
 func (r *Raft) Start() {
-	utils.Invariant(r.currentState == Follower, "Call Start() only on a Follower")
+	utils.Invariant(r.l, r.currentState == Follower, "Call Start() only on a Follower")
 
 	// Start the election timer
 	go r.startElectionTimer()
@@ -84,7 +89,7 @@ func (r *Raft) startElectionTimer() {
 	for range response {
 		// Timer has passed start the election
 
-		fmt.Println("Starting election")
+		r.l.Info("Starting election")
 
 		return
 	}
