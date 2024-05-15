@@ -16,6 +16,7 @@ func main() {
 		VotedFor:             -1,
 		MinElectionTimeoutMs: 150,
 		TransporterClient:    defaultRaftTransport,
+		HeartbeatTimeoutMs:   50,
 	})
 
 	raftServer.Start()
@@ -30,6 +31,7 @@ func main() {
 		VotedFor:             -1,
 		MinElectionTimeoutMs: 150,
 		TransporterClient:    defaultRaftTransport,
+		HeartbeatTimeoutMs:   50,
 	})
 
 	raftServer.Start()
