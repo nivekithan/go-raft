@@ -31,7 +31,10 @@ type Raft struct {
 	heartbeatTimer       *timer
 	heartbeatTimeoutChan chan int
 
-	requestVoteResChan chan requestVoteRes
+	electionResChan chan requestVoteRes
+
+	requestVoteRpcArgsChan  chan RequestVoteArgs
+	requestVoteRpcReplyChan chan RequestVoteReply
 }
 
 func NewRaft(config RaftConfig) *Raft {
@@ -46,12 +49,13 @@ func NewRaft(config RaftConfig) *Raft {
 		currentTerm:          0,
 		electionTimeoutChan:  make(chan int),
 		heartbeatTimeoutChan: make(chan int),
-		requestVoteResChan:   make(chan requestVoteRes),
+		electionResChan:      make(chan requestVoteRes),
 	}
 }
 
 func (r *Raft) Start() {
 	r.setNewElectionTimer()
+	go r.startRpcServer()
 	r.mainLoop()
 }
 
@@ -79,6 +83,10 @@ func (r *Raft) startFollowerLoop() {
 			}
 
 			r.startElection()
+
+		case args := <-r.requestVoteRpcArgsChan:
+			r.respondToRequestVoteRpc(args)
+
 		}
 	}
 }
@@ -93,7 +101,7 @@ func (r *Raft) startCandidateLoop() {
 			}
 			r.startElection()
 
-		case resFromReqeustVote := <-r.requestVoteResChan:
+		case resFromReqeustVote := <-r.electionResChan:
 			if resFromReqeustVote.term != r.currentTerm {
 				// Ignore this command
 				continue
@@ -105,6 +113,9 @@ func (r *Raft) startCandidateLoop() {
 				r.convertToLeader()
 			}
 
+		case args := <-r.requestVoteRpcArgsChan:
+			r.respondToRequestVoteRpc(args)
+
 		}
 
 	}
@@ -115,12 +126,32 @@ func (r *Raft) startLeaderLoop() {
 
 }
 
+func (r *Raft) respondToRequestVoteRpc(args RequestVoteArgs) {
+
+	if r.currentTerm > args.Term {
+		r.requestVoteRpcReplyChan <- RequestVoteReply{Term: r.currentTerm, VoteGranted: false}
+	}
+
+	if args.Term > r.currentTerm {
+		r.convertToFollower(args.Term)
+	}
+
+	if r.votedFor == NullId || r.votedFor == args.CandidateId {
+		r.votedFor = args.CandidateId
+		r.setNewElectionTimer()
+		r.requestVoteRpcReplyChan <- RequestVoteReply{Term: r.currentTerm, VoteGranted: true}
+	} else {
+		r.requestVoteRpcReplyChan <- RequestVoteReply{Term: r.currentTerm, VoteGranted: false}
+	}
+
+}
+
 func (r *Raft) startElection() {
 	r.currentTerm++
 	r.votedFor = r.id
 	r.state = Candidate
 
-	requestVoteFromAll(r.peers, r.currentTerm, r.id, r.requestVoteResChan)
+	requestVoteFromAll(r.peers, r.currentTerm, r.id, r.electionResChan)
 	r.setNewElectionTimer()
 }
 

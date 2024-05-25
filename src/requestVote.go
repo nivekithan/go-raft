@@ -46,7 +46,7 @@ func requestVoteFromAll(peers []int, term int, id int, respond chan<- requestVot
 			wg.Add(1)
 			go func(peerId int) {
 				defer wg.Done()
-				client, err := rpc.Dial("tcp", "localhost"+fmt.Sprintf(":%d", 9000+peerId))
+				client, err := rpc.Dial("tcp", fmt.Sprintf(":%d", 9000+peerId))
 
 				if err != nil {
 
