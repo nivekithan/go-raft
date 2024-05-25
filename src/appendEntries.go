@@ -16,49 +16,57 @@ type AppendEntriesReply struct {
 	Success bool
 }
 
-func sendAppendEntiresToAll(peers []int, term int, id int, respond chan<- stateChangeReq) {
-
-	// This allows us to not to read from all responses from `indivialResponses` in case
-	// we know already know the result.
-	indivialResponses := make(chan AppendEntriesReply, len(peers))
-
-	var wg sync.WaitGroup
+func sendAppendEntiresToAll(peers []int, term int, id int, respond chan<- stateChangeReq, connected bool) {
 
 	go func() {
-		wg.Wait()
-		close(indivialResponses)
-	}()
 
-	for _, peerId := range peers {
-		wg.Add(1)
-		go func(peerId int) {
-			defer wg.Done()
-			client, err := rpc.Dial("tcp", fmt.Sprintf(":%d", 9000+peerId))
-			defer client.Close()
-
-			if err != nil {
-				return
-			}
-
-			var reply AppendEntriesReply
-			err = client.Call("Raft.AppendEntries", AppendEntiesArgs{Term: term, LeaderId: id}, &reply)
-
-			if err != nil {
-				// Ignore this request
-				return
-			}
-
-			indivialResponses <- reply
-		}(peerId)
-	}
-
-	for reply := range indivialResponses {
-
-		if reply.Term > term {
-			respond <- stateChangeReq{term: term, newTerm: reply.Term, command: convertToFollower}
+		if !connected {
 			return
 		}
 
-	}
+		// This allows us to not to read from all responses from `indivialResponses` in case
+		// we know already know the result.
+		indivialResponses := make(chan AppendEntriesReply, len(peers))
 
+		var wg sync.WaitGroup
+
+		go func() {
+			wg.Wait()
+			close(indivialResponses)
+		}()
+
+		for _, peerId := range peers {
+			wg.Add(1)
+			go func(peerId int) {
+				client, err := rpc.Dial("tcp", fmt.Sprintf(":%d", 9000+peerId))
+
+				if err != nil {
+					wg.Done()
+					return
+				}
+
+				defer client.Close()
+				var reply AppendEntriesReply
+				err = client.Call("Raft.AppendEntries", AppendEntiesArgs{Term: term, LeaderId: id}, &reply)
+
+				if err != nil {
+					wg.Done()
+					// Ignore this request
+					return
+				}
+
+				indivialResponses <- reply
+				wg.Done()
+			}(peerId)
+		}
+
+		for reply := range indivialResponses {
+
+			if reply.Term > term {
+				respond <- stateChangeReq{term: term, newTerm: reply.Term, command: convertToFollower}
+				return
+			}
+
+		}
+	}()
 }

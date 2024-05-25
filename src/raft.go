@@ -2,7 +2,9 @@ package raft
 
 import (
 	"log/slog"
+	"net"
 	"os"
+	"sync"
 	"time"
 )
 
@@ -27,6 +29,9 @@ type Raft struct {
 	votedFor    int
 
 	// Internal Variables
+	rpcServerListern net.Listener
+	stopServerWg     sync.WaitGroup
+
 	electionTimer       *timer
 	electionTimeoutChan chan int
 
@@ -41,8 +46,13 @@ type Raft struct {
 	appendEntriesRpcArgsChan  chan AppendEntiesArgs
 	appendEntriesRpcReplyChan chan AppendEntriesReply
 
+	done chan interface{}
+
 	// Logging
 	l *slog.Logger
+
+	// Variables used for testing
+	connected bool
 }
 
 func NewRaft(config RaftConfig) *Raft {
@@ -62,7 +72,15 @@ func NewRaft(config RaftConfig) *Raft {
 		requestVoteRpcReplyChan:   make(chan RequestVoteReply),
 		appendEntriesRpcArgsChan:  make(chan AppendEntiesArgs),
 		appendEntriesRpcReplyChan: make(chan AppendEntriesReply),
-		l:                         slog.New(slog.NewTextHandler(os.Stdout, nil)).With("id", config.Id),
+		done:                      make(chan interface{}),
+		l: slog.New(
+			slog.NewTextHandler(
+				os.Stdout,
+				&slog.HandlerOptions{Level: slog.LevelInfo},
+			),
+		).With("id", config.Id),
+
+		connected: true,
 	}
 
 	return raft
@@ -82,15 +100,25 @@ func (r *Raft) Id() int {
 	return r.id
 }
 
+func (r *Raft) Term() int {
+	return r.currentTerm
+}
+
 func (r *Raft) mainLoop() {
 	for {
 		switch r.state {
 		case Follower:
+			r.ilog("Running Follower Loop")
 			r.startFollowerLoop()
 		case Candidate:
+			r.ilog("Running Canidate Loop")
 			r.startCandidateLoop()
 		case Leader:
+			r.ilog("Running Leader Loop")
 			r.startLeaderLoop()
+		case Dead:
+			r.ilog("Stopping Main Loop")
+			return
 		}
 	}
 }
@@ -112,6 +140,8 @@ func (r *Raft) startFollowerLoop() {
 
 		case args := <-r.appendEntriesRpcArgsChan:
 			r.respondToAppendEntriesRpc(args)
+		case <-r.done:
+			r.stopNode()
 		}
 	}
 }
@@ -142,6 +172,8 @@ func (r *Raft) startCandidateLoop() {
 
 		case args := <-r.appendEntriesRpcArgsChan:
 			r.respondToAppendEntriesRpc(args)
+		case <-r.done:
+			r.stopNode()
 		}
 
 	}
@@ -175,6 +207,8 @@ func (r *Raft) startLeaderLoop() {
 
 		case args := <-r.appendEntriesRpcArgsChan:
 			r.respondToAppendEntriesRpc(args)
+		case <-r.done:
+			r.stopNode()
 		}
 
 	}
@@ -203,6 +237,7 @@ func (r *Raft) respondToRequestVoteRpc(args RequestVoteArgs) {
 func (r *Raft) respondToAppendEntriesRpc(args AppendEntiesArgs) {
 	if r.currentTerm > args.Term {
 		r.appendEntriesRpcReplyChan <- AppendEntriesReply{Term: r.currentTerm, Success: false}
+		return
 	}
 
 	if args.Term > r.currentTerm {
@@ -214,15 +249,23 @@ func (r *Raft) respondToAppendEntriesRpc(args AppendEntiesArgs) {
 }
 
 func (r *Raft) startElection() {
+	if r.state != Candidate {
+
+		r.ilog("Converting to candidate")
+	}
 	r.currentTerm++
 	r.votedFor = r.id
 	r.state = Candidate
 
-	requestVoteFromAll(r.peers, r.currentTerm, r.id, r.stateChangeChan)
+	r.dlog("Sending requestVoteFromAll")
+	requestVoteFromAll(r.peers, r.currentTerm, r.id, r.stateChangeChan, r.connected)
 	r.setNewElectionTimer()
 }
 
 func (r *Raft) convertToFollower(newTerm int) {
+	if r.state != Follower {
+		r.ilog("Converting to Follower")
+	}
 	r.currentTerm = newTerm
 	r.votedFor = -1
 	r.state = Follower
@@ -231,20 +274,23 @@ func (r *Raft) convertToFollower(newTerm int) {
 	if r.heartbeatTimer != nil {
 		CancelTimer(r.heartbeatTimer)
 	}
+
 }
 
 func (r *Raft) convertToLeader() {
 	r.state = Leader
+	r.ilog("Converting to Leader")
 	r.sendHearbeats()
 }
 
 func (r *Raft) sendHearbeats() {
-	sendAppendEntiresToAll(r.peers, r.currentTerm, r.id, r.stateChangeChan)
+	sendAppendEntiresToAll(r.peers, r.currentTerm, r.id, r.stateChangeChan, r.connected)
 	r.setNewHeartbeatTimer()
 
 }
 
 func (r *Raft) setNewElectionTimer() {
+	r.dlog("Reseting election timer")
 	newElectionTimeout := randomTimeout(r.electionTimeout)
 
 	if r.electionTimer != nil {
@@ -268,4 +314,14 @@ func (r *Raft) setNewHeartbeatTimer() {
 		r.currentTerm,
 		r.heartbeatTimeoutChan,
 	)
+}
+
+func (r *Raft) stopNode() {
+	r.stopRpcServer()
+}
+
+func (r *Raft) Stop() {
+	r.done <- true
+	r.stopServerWg.Wait()
+	r.state = Dead
 }

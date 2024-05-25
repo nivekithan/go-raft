@@ -6,6 +6,7 @@ const (
 	Follower RaftState = iota
 	Leader
 	Candidate
+	Dead
 )
 
 func (r RaftState) String() string {

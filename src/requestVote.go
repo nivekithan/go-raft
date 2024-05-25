@@ -16,7 +16,13 @@ type RequestVoteReply struct {
 	VoteGranted bool
 }
 
-func requestVoteFromAll(peers []int, term int, id int, respond chan<- stateChangeReq) {
+func requestVoteFromAll(peers []int, term int, id int, respond chan<- stateChangeReq, connected bool) {
+
+	if !connected {
+		fmt.Println("Not sending requestVoteFromAll since we are not connected")
+		return
+	}
+
 	go func() {
 		// This allows us to not to read from all responses from `indivialResponses` in case
 		// we know already know the result.

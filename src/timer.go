@@ -69,8 +69,8 @@ func (t *timer) runAfterStartCommand() {
 		case <-ticker.C:
 			isTimeoutPassed := time.Now().After(t.timeoutOn)
 			if isTimeoutPassed {
-				t.respond <- t.term
 				t.finished = true
+				t.respond <- t.term
 				return
 			}
 
