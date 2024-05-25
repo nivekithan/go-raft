@@ -24,3 +24,16 @@ func (r RaftState) String() string {
 const (
 	NullId = -1
 )
+
+type stateChangeReqCommand int
+
+const (
+	convertToFollower stateChangeReqCommand = iota
+	convertToLeader
+)
+
+type stateChangeReq struct {
+	term    int
+	newTerm int
+	command stateChangeReqCommand
+}

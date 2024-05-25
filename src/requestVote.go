@@ -16,20 +16,7 @@ type RequestVoteReply struct {
 	VoteGranted bool
 }
 
-type requestVoteResCommand int
-
-const (
-	convertToFollower requestVoteResCommand = iota
-	convertToLeader
-)
-
-type requestVoteRes struct {
-	term    int
-	newTerm int
-	command requestVoteResCommand
-}
-
-func requestVoteFromAll(peers []int, term int, id int, respond chan<- requestVoteRes) {
+func requestVoteFromAll(peers []int, term int, id int, respond chan<- stateChangeReq) {
 	go func() {
 		// This allows us to not to read from all responses from `indivialResponses` in case
 		// we know already know the result.
@@ -77,14 +64,14 @@ func requestVoteFromAll(peers []int, term int, id int, respond chan<- requestVot
 			}
 
 			if reply.Term > term {
-				respond <- requestVoteRes{term: term, command: convertToFollower, newTerm: reply.Term}
+				respond <- stateChangeReq{term: term, command: convertToFollower, newTerm: reply.Term}
 				return
 			}
 
 			isWonELection := totalVotes > len(peers)/2
 
 			if isWonELection {
-				respond <- requestVoteRes{term: term, command: convertToLeader}
+				respond <- stateChangeReq{term: term, command: convertToLeader}
 				return
 			}
 		}

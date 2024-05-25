@@ -31,10 +31,13 @@ type Raft struct {
 	heartbeatTimer       *timer
 	heartbeatTimeoutChan chan int
 
-	electionResChan chan requestVoteRes
+	stateChangeChan chan stateChangeReq
 
 	requestVoteRpcArgsChan  chan RequestVoteArgs
 	requestVoteRpcReplyChan chan RequestVoteReply
+
+	appendEntriesRpcArgsChan  chan AppendEntiesArgs
+	appendEntriesRpcReplyChan chan AppendEntriesReply
 }
 
 func NewRaft(config RaftConfig) *Raft {
@@ -49,7 +52,7 @@ func NewRaft(config RaftConfig) *Raft {
 		currentTerm:          0,
 		electionTimeoutChan:  make(chan int),
 		heartbeatTimeoutChan: make(chan int),
-		electionResChan:      make(chan requestVoteRes),
+		stateChangeChan:      make(chan stateChangeReq),
 	}
 }
 
@@ -87,6 +90,8 @@ func (r *Raft) startFollowerLoop() {
 		case args := <-r.requestVoteRpcArgsChan:
 			r.respondToRequestVoteRpc(args)
 
+		case args := <-r.appendEntriesRpcArgsChan:
+			r.respondToAppendEntriesRpc(args)
 		}
 	}
 }
@@ -101,7 +106,7 @@ func (r *Raft) startCandidateLoop() {
 			}
 			r.startElection()
 
-		case resFromReqeustVote := <-r.electionResChan:
+		case resFromReqeustVote := <-r.stateChangeChan:
 			if resFromReqeustVote.term != r.currentTerm {
 				// Ignore this command
 				continue
@@ -116,6 +121,8 @@ func (r *Raft) startCandidateLoop() {
 		case args := <-r.requestVoteRpcArgsChan:
 			r.respondToRequestVoteRpc(args)
 
+		case args := <-r.appendEntriesRpcArgsChan:
+			r.respondToAppendEntriesRpc(args)
 		}
 
 	}
@@ -123,6 +130,35 @@ func (r *Raft) startCandidateLoop() {
 }
 
 func (r *Raft) startLeaderLoop() {
+
+	for r.state == Leader {
+		select {
+		case term := <-r.heartbeatTimeoutChan:
+			if term != r.currentTerm {
+				// Ignore this message
+				continue
+			}
+
+			r.sendHearbeats()
+
+		case stateChangeReq := <-r.stateChangeChan:
+			if stateChangeReq.term != r.currentTerm {
+				// Ignore this request
+				continue
+			}
+
+			if stateChangeReq.command == convertToFollower {
+				r.convertToFollower(stateChangeReq.newTerm)
+			}
+
+		case args := <-r.requestVoteRpcArgsChan:
+			r.respondToRequestVoteRpc(args)
+
+		case args := <-r.appendEntriesRpcArgsChan:
+			r.respondToAppendEntriesRpc(args)
+		}
+
+	}
 
 }
 
@@ -143,7 +179,19 @@ func (r *Raft) respondToRequestVoteRpc(args RequestVoteArgs) {
 	} else {
 		r.requestVoteRpcReplyChan <- RequestVoteReply{Term: r.currentTerm, VoteGranted: false}
 	}
+}
 
+func (r *Raft) respondToAppendEntriesRpc(args AppendEntiesArgs) {
+	if r.currentTerm > args.Term {
+		r.appendEntriesRpcReplyChan <- AppendEntriesReply{Term: r.currentTerm, Success: false}
+	}
+
+	if args.Term > r.currentTerm {
+		r.convertToFollower(args.Term)
+	}
+
+	r.setNewElectionTimer()
+	r.appendEntriesRpcReplyChan <- AppendEntriesReply{Term: r.currentTerm, Success: true}
 }
 
 func (r *Raft) startElection() {
@@ -151,7 +199,7 @@ func (r *Raft) startElection() {
 	r.votedFor = r.id
 	r.state = Candidate
 
-	requestVoteFromAll(r.peers, r.currentTerm, r.id, r.electionResChan)
+	requestVoteFromAll(r.peers, r.currentTerm, r.id, r.stateChangeChan)
 	r.setNewElectionTimer()
 }
 
@@ -168,9 +216,11 @@ func (r *Raft) convertToFollower(newTerm int) {
 
 func (r *Raft) convertToLeader() {
 	r.state = Leader
+	r.sendHearbeats()
+}
 
-	// TODO:
-	// Send heartbeats
+func (r *Raft) sendHearbeats() {
+	sendAppendEntiresToAll(r.peers, r.currentTerm, r.id, r.stateChangeChan)
 	r.setNewHeartbeatTimer()
 
 }

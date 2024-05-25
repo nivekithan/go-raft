@@ -14,8 +14,12 @@ func (r *Raft) RequestVote(args RequestVoteArgs, reply *RequestVoteReply) error 
 	return nil
 }
 
-func (r *Raft) AppendEntries() {
+func (r *Raft) AppendEntries(args AppendEntiesArgs, reply *AppendEntriesReply) error {
+	r.appendEntriesRpcArgsChan <- args
 
+	*reply = <-r.appendEntriesRpcReplyChan
+
+	return nil
 }
 
 func (r *Raft) startRpcServer() {
