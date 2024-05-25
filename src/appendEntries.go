@@ -34,6 +34,7 @@ func sendAppendEntiresToAll(peers []int, term int, id int, respond chan<- stateC
 		go func(peerId int) {
 			defer wg.Done()
 			client, err := rpc.Dial("tcp", fmt.Sprintf(":%d", 9000+peerId))
+			defer client.Close()
 
 			if err != nil {
 				return
