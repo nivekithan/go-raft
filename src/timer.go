@@ -7,6 +7,7 @@ type timer struct {
 	term      int
 	control   chan controlTimerCommand
 	respond   chan<- int
+	finished  bool
 }
 
 type controlTimerCommand int
@@ -22,17 +23,24 @@ func NewTimer(duration time.Duration, term int, res chan<- int) *timer {
 		term:      term,
 		control:   make(chan controlTimerCommand),
 		respond:   res,
+		finished:  false,
 	}
+
+	go timer.runAfterStartCommand()
 
 	return timer
 }
 
 func StartTimer(timer *timer) {
-	timer.control <- startTimerCommand
+	if !timer.finished {
+		timer.control <- startTimerCommand
+	}
 }
 
 func CancelTimer(timer *timer) {
-	timer.control <- cancelTimerCommand
+	if !timer.finished {
+		timer.control <- cancelTimerCommand
+	}
 }
 
 func NewAndStartTimer(duration time.Duration, term int, res chan<- int) *timer {
@@ -53,6 +61,7 @@ func (t *timer) runAfterStartCommand() {
 	}
 
 	ticker := time.NewTicker(10 * time.Millisecond)
+	defer ticker.Stop()
 
 	for {
 		select {
@@ -61,6 +70,7 @@ func (t *timer) runAfterStartCommand() {
 			isTimeoutPassed := time.Now().After(t.timeoutOn)
 			if isTimeoutPassed {
 				t.respond <- t.term
+				t.finished = true
 				return
 			}
 
@@ -69,7 +79,7 @@ func (t *timer) runAfterStartCommand() {
 			if command != cancelTimerCommand {
 				continue
 			}
-
+			t.finished = true
 			return
 		}
 	}

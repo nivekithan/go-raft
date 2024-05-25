@@ -1,6 +1,8 @@
 package raft
 
 import (
+	"log/slog"
+	"os"
 	"time"
 )
 
@@ -38,28 +40,46 @@ type Raft struct {
 
 	appendEntriesRpcArgsChan  chan AppendEntiesArgs
 	appendEntriesRpcReplyChan chan AppendEntriesReply
+
+	// Logging
+	l *slog.Logger
 }
 
 func NewRaft(config RaftConfig) *Raft {
 
-	return &Raft{
-		id:                   config.Id,
-		peers:                config.Peers,
-		electionTimeout:      config.ElectionTimeout,
-		heartbeatTimeout:     config.HeartbeatTimeout,
-		votedFor:             NullId,
-		state:                Follower,
-		currentTerm:          0,
-		electionTimeoutChan:  make(chan int),
-		heartbeatTimeoutChan: make(chan int),
-		stateChangeChan:      make(chan stateChangeReq),
+	raft := &Raft{
+		id:                        config.Id,
+		peers:                     config.Peers,
+		electionTimeout:           config.ElectionTimeout,
+		heartbeatTimeout:          config.HeartbeatTimeout,
+		votedFor:                  NullId,
+		state:                     Follower,
+		currentTerm:               0,
+		electionTimeoutChan:       make(chan int),
+		heartbeatTimeoutChan:      make(chan int),
+		stateChangeChan:           make(chan stateChangeReq),
+		requestVoteRpcArgsChan:    make(chan RequestVoteArgs),
+		requestVoteRpcReplyChan:   make(chan RequestVoteReply),
+		appendEntriesRpcArgsChan:  make(chan AppendEntiesArgs),
+		appendEntriesRpcReplyChan: make(chan AppendEntriesReply),
+		l:                         slog.New(slog.NewTextHandler(os.Stdout, nil)).With("id", config.Id),
 	}
+
+	return raft
 }
 
 func (r *Raft) Start() {
 	r.setNewElectionTimer()
 	go r.startRpcServer()
 	r.mainLoop()
+}
+
+func (r *Raft) State() RaftState {
+	return r.state
+}
+
+func (r *Raft) Id() int {
+	return r.id
 }
 
 func (r *Raft) mainLoop() {
@@ -108,7 +128,6 @@ func (r *Raft) startCandidateLoop() {
 
 		case resFromReqeustVote := <-r.stateChangeChan:
 			if resFromReqeustVote.term != r.currentTerm {
-				// Ignore this command
 				continue
 			}
 

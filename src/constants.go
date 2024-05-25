@@ -32,6 +32,19 @@ const (
 	convertToLeader
 )
 
+func (s stateChangeReqCommand) String() string {
+
+	switch s {
+	case convertToFollower:
+		return "ConvertToFollower"
+	case convertToLeader:
+		return "ConvertToLeader"
+	default:
+		panic("Unknown state")
+	}
+
+}
+
 type stateChangeReq struct {
 	term    int
 	newTerm int

@@ -7,18 +7,19 @@ import (
 )
 
 func (r *Raft) RequestVote(args RequestVoteArgs, reply *RequestVoteReply) error {
+	r.dlog("Responding to RequestVote RPC")
 	r.requestVoteRpcArgsChan <- args
-
 	*reply = <-r.requestVoteRpcReplyChan
-
+	r.dlog("Responded to RequestVote")
 	return nil
 }
 
 func (r *Raft) AppendEntries(args AppendEntiesArgs, reply *AppendEntriesReply) error {
+	r.dlog("Responding to AppendEntries")
 	r.appendEntriesRpcArgsChan <- args
 
 	*reply = <-r.appendEntriesRpcReplyChan
-
+	r.dlog("Responded to AppendEntries")
 	return nil
 }
 
@@ -34,5 +35,6 @@ func (r *Raft) startRpcServer() {
 		panic(err)
 	}
 
+	r.ilog("Starting rpc server")
 	rpcServer.Accept(lis)
 }

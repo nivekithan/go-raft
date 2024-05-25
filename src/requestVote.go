@@ -68,7 +68,7 @@ func requestVoteFromAll(peers []int, term int, id int, respond chan<- stateChang
 				return
 			}
 
-			isWonELection := totalVotes > len(peers)/2
+			isWonELection := totalVotes > (len(peers)+1)/2
 
 			if isWonELection {
 				respond <- stateChangeReq{term: term, command: convertToLeader}
