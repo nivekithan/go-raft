@@ -324,11 +324,20 @@ func (r *Raft) stopNode() {
 	if r.electionTimer != nil {
 		CancelTimer(r.electionTimer)
 	}
+
+	r.ilog("Stopped all timers")
 	r.stopRpcServer()
+	r.ilog("Stopped RPC Server")
+
+	close(r.requestVoteRpcReplyChan)
+	close(r.appendEntriesRpcReplyChan)
+
+	r.ilog("Closed all rpc reply channels")
+	r.state = Dead
+	r.ilog("Updated state to Dead")
 }
 
 func (r *Raft) Stop() {
 	r.done <- true
 	r.stopServerWg.Wait()
-	r.state = Dead
 }

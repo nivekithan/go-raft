@@ -70,8 +70,14 @@ func (t *timer) runAfterStartCommand() {
 			isTimeoutPassed := time.Now().After(t.timeoutOn)
 			if isTimeoutPassed {
 				t.finished = true
-				t.respond <- t.term
-				return
+
+				timer := time.NewTimer(2 * time.Second)
+				select {
+				case t.respond <- t.term:
+					return
+				case <-timer.C:
+					return
+				}
 			}
 
 		case command := <-t.control:

@@ -14,7 +14,12 @@ func (r *Raft) RequestVote(args RequestVoteArgs, reply *RequestVoteReply) error 
 
 	r.dlog("Responding to RequestVote RPC")
 	r.requestVoteRpcArgsChan <- args
-	*reply = <-r.requestVoteRpcReplyChan
+	var more bool
+	*reply, more = <-r.requestVoteRpcReplyChan
+
+	if !more {
+		return errors.New("Server has shutdown")
+	}
 	r.dlog("Responded to RequestVote")
 	return nil
 }
@@ -27,7 +32,13 @@ func (r *Raft) AppendEntries(args AppendEntiesArgs, reply *AppendEntriesReply) e
 	r.dlog("Responding to AppendEntries")
 	r.appendEntriesRpcArgsChan <- args
 
-	*reply = <-r.appendEntriesRpcReplyChan
+	var more bool
+	*reply, more = <-r.appendEntriesRpcReplyChan
+
+	if !more {
+		return errors.New("Server has shutdown")
+	}
+
 	r.dlog("Responded to AppendEntries")
 	return nil
 }

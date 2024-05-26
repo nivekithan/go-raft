@@ -4,27 +4,31 @@ import (
 	"fmt"
 	"testing"
 	"time"
+
+	"github.com/fortytw2/leaktest"
 )
 
 func TestElectionBasic(t *testing.T) {
 	// t.Skip()
-	h := newTestHarness(t, 3)
+	defer leaktest.Check(t)()
 
-	t.Cleanup(func() { h.stop() })
+	h := newTestHarness(t, 3)
 	h.start()
+
+	defer h.stop()
 
 	h.CheckSingleLeader()
 
 }
 
 func TestElectionLeaderDisconnect(t *testing.T) {
-	// t.Skip()
+	// 	t.Skip()
+	defer leaktest.Check(t)()
 
 	h := newTestHarness(t, 3)
-
-	t.Cleanup(func() { h.stop() })
-
 	h.start()
+
+	defer h.stop()
 
 	origLeaderId, origTerm := h.CheckSingleLeader()
 
@@ -45,11 +49,12 @@ func TestElectionLeaderDisconnect(t *testing.T) {
 
 func TestElectionLeaderAndAnotherDisconnect(t *testing.T) {
 	// t.Skip()
+	defer leaktest.Check(t)()
 
 	h := newTestHarness(t, 3)
 	h.start()
 
-	t.Cleanup(func() { h.stop() })
+	defer h.stop()
 
 	origLeaderId, _ := h.CheckSingleLeader()
 
@@ -78,12 +83,13 @@ func TestElectionLeaderAndAnotherDisconnect(t *testing.T) {
 
 func TestDisconnectAllThenRestore(t *testing.T) {
 	// t.Skip()
+	defer leaktest.Check(t)()
 
 	h := newTestHarness(t, 3)
 
 	h.start()
 
-	t.Cleanup(func() { h.stop() })
+	defer h.stop()
 
 	time.Sleep(100 * time.Millisecond)
 	//	Disconnect all servers from the start. There will be no leader.
@@ -104,11 +110,12 @@ func TestDisconnectAllThenRestore(t *testing.T) {
 }
 
 func TestElectionLeaderDisconnectThenReconnect(t *testing.T) {
-	// t.Skip()
+	defer leaktest.Check(t)()
+	t.Skip()
 	h := newTestHarness(t, 3)
 	h.start()
 
-	t.Cleanup(func() { h.stop() })
+	defer h.stop()
 
 	origLeaderId, _ := h.CheckSingleLeader()
 
