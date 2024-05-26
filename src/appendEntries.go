@@ -4,6 +4,7 @@ import (
 	"fmt"
 	"net/rpc"
 	"sync"
+	"time"
 )
 
 type AppendEntiesArgs struct {
@@ -60,13 +61,22 @@ func sendAppendEntiresToAll(peers []int, term int, id int, respond chan<- stateC
 			}(peerId)
 		}
 
+		var response stateChangeReq
+
 		for reply := range indivialResponses {
 
 			if reply.Term > term {
-				respond <- stateChangeReq{term: term, newTerm: reply.Term, command: convertToFollower}
-				return
+				response = stateChangeReq{term: term, newTerm: reply.Term, command: convertToFollower}
+				break
 			}
+		}
 
+		timer := time.NewTimer(5 * time.Second)
+		select {
+		case respond <- response:
+			return
+		case <-timer.C:
+			return
 		}
 	}()
 }

@@ -104,6 +104,7 @@ func TestDisconnectAllThenRestore(t *testing.T) {
 }
 
 func TestElectionLeaderDisconnectThenReconnect(t *testing.T) {
+	// t.Skip()
 	h := newTestHarness(t, 3)
 	h.start()
 

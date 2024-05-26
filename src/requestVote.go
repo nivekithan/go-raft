@@ -4,6 +4,7 @@ import (
 	"fmt"
 	"net/rpc"
 	"sync"
+	"time"
 )
 
 type RequestVoteArgs struct {
@@ -25,7 +26,7 @@ func requestVoteFromAll(peers []int, term int, id int, respond chan<- stateChang
 
 	go func() {
 		// This allows us to not to read from all responses from `indivialResponses` in case
-		// we know already know the result.
+		// we know already know the result or the server got shutdown
 		indivialResponses := make(chan RequestVoteReply, len(peers))
 
 		var wg sync.WaitGroup
@@ -64,6 +65,8 @@ func requestVoteFromAll(peers []int, term int, id int, respond chan<- stateChang
 		totalVotes := 1 // We have voted for ourveles already
 		responsesRecived := 0
 
+		var response stateChangeReq
+
 		for reply := range indivialResponses {
 			responsesRecived++
 
@@ -72,16 +75,24 @@ func requestVoteFromAll(peers []int, term int, id int, respond chan<- stateChang
 			}
 
 			if reply.Term > term {
-				respond <- stateChangeReq{term: term, command: convertToFollower, newTerm: reply.Term}
-				return
+				response = stateChangeReq{term: term, command: convertToFollower, newTerm: reply.Term}
+				break
 			}
 
 			isWonELection := totalVotes > (len(peers)+1)/2
 
 			if isWonELection {
-				respond <- stateChangeReq{term: term, command: convertToLeader}
-				return
+				response = stateChangeReq{term: term, command: convertToLeader}
+				break
 			}
+		}
+
+		timer := time.NewTimer(5 * time.Second)
+		select {
+		case respond <- response:
+			return
+		case <-timer.C:
+			return
 		}
 
 	}()

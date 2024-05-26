@@ -317,6 +317,13 @@ func (r *Raft) setNewHeartbeatTimer() {
 }
 
 func (r *Raft) stopNode() {
+	if r.heartbeatTimer != nil {
+		CancelTimer(r.heartbeatTimer)
+	}
+
+	if r.electionTimer != nil {
+		CancelTimer(r.electionTimer)
+	}
 	r.stopRpcServer()
 }
 
