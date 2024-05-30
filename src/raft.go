@@ -13,6 +13,14 @@ type RaftConfig struct {
 	Peers            []int
 	ElectionTimeout  int
 	HeartbeatTimeout int
+
+	// Clients sends commands through this channel
+	ClientCommandsChan <-chan []byte
+}
+
+type logEntry struct {
+	command []byte
+	term    int
 }
 
 type Raft struct {
@@ -27,8 +35,19 @@ type Raft struct {
 	// Raft Perist variables
 	currentTerm int
 	votedFor    int
+	log         []logEntry
+
+	// Volatile state on all server
+	commitIndex int
+	lastApplied int
+
+	// Volatile state on leaders
+	nextIndex  map[int]int
+	matchIndex map[int]int
 
 	// Internal Variables
+	clientCommandsChan <-chan []byte
+
 	rpcServerListern net.Listener
 	stopServerWg     sync.WaitGroup
 
@@ -65,6 +84,12 @@ func NewRaft(config RaftConfig) *Raft {
 		votedFor:                  NullId,
 		state:                     Follower,
 		currentTerm:               0,
+		log:                       []logEntry{},
+		commitIndex:               0,
+		lastApplied:               0,
+		nextIndex:                 make(map[int]int),
+		matchIndex:                make(map[int]int),
+		clientCommandsChan:        config.ClientCommandsChan,
 		electionTimeoutChan:       make(chan int),
 		heartbeatTimeoutChan:      make(chan int),
 		stateChangeChan:           make(chan stateChangeReq),
@@ -207,6 +232,9 @@ func (r *Raft) startLeaderLoop() {
 
 		case args := <-r.appendEntriesRpcArgsChan:
 			r.respondToAppendEntriesRpc(args)
+		case command := <-r.clientCommandsChan:
+			r.processLogEntry(logEntry{command: command, term: r.currentTerm})
+
 		case <-r.done:
 			r.stopNode()
 		}
@@ -244,13 +272,56 @@ func (r *Raft) respondToAppendEntriesRpc(args AppendEntiesArgs) {
 		r.convertToFollower(args.Term)
 	}
 
+	isEntriesEmpty := len(args.Entries) == 0
+
+	if isEntriesEmpty {
+		r.setNewElectionTimer()
+		r.appendEntriesRpcReplyChan <- AppendEntriesReply{Term: r.currentTerm, Success: true}
+		return
+	}
+
+	if args.PrevLogIndex != -1 {
+		// There are entries to be checked
+
+		if args.PrevLogIndex >= len(r.log) {
+			r.appendEntriesRpcReplyChan <- AppendEntriesReply{Term: r.currentTerm, Success: false}
+			return
+		}
+
+		if args.PrevLogTerm != r.log[args.PrevLogIndex].term {
+			r.appendEntriesRpcReplyChan <- AppendEntriesReply{Term: r.currentTerm, Success: false}
+			return
+		}
+	}
+
+	for index, entry := range args.Entries {
+		r.log[index] = entry
+	}
+
+	if args.LeaderCommit > r.commitIndex {
+
+		r.commitIndex = func() int {
+			indexOfLastEntry := len(args.Entries) - 1
+
+			if args.LeaderCommit > indexOfLastEntry {
+				return indexOfLastEntry
+			} else {
+				return args.LeaderCommit
+			}
+		}()
+	}
+
 	r.setNewElectionTimer()
 	r.appendEntriesRpcReplyChan <- AppendEntriesReply{Term: r.currentTerm, Success: true}
+
+}
+
+func (r *Raft) processLogEntry(logEntry logEntry) {
+	r.log = append(r.log, logEntry)
 }
 
 func (r *Raft) startElection() {
 	if r.state != Candidate {
-
 		r.ilog("Converting to candidate")
 	}
 	r.currentTerm++
@@ -279,14 +350,64 @@ func (r *Raft) convertToFollower(newTerm int) {
 
 func (r *Raft) convertToLeader() {
 	r.state = Leader
+
+	// Reset nextIndex and matchIndex whenever we become leader
+	for _, id := range r.peers {
+		r.nextIndex[id] = len(r.log)
+		r.matchIndex[id] = 0
+	}
+
 	r.ilog("Converting to Leader")
 	r.sendHearbeats()
 }
 
 func (r *Raft) sendHearbeats() {
-	sendAppendEntiresToAll(r.peers, r.currentTerm, r.id, r.stateChangeChan, r.connected)
+	appendEntiresConfig := r.getAppendEntiresConfig()
+
+	sendAppendEntiresToAll(appendEntiresConfig, r.currentTerm, r.stateChangeChan, r.connected)
 	r.setNewHeartbeatTimer()
 
+}
+
+func (r *Raft) getAppendEntiresConfig() *[]sendAppendEntriesConfig {
+	appendEntiresConfig := []sendAppendEntriesConfig{}
+
+	for _, peerId := range r.peers {
+		logIndexToSend := r.nextIndex[peerId]
+		prevLogIndex := logIndexToSend - 1
+
+		prevLogTerm := func() int {
+			if prevLogIndex < 0 {
+				return 0
+			}
+			return r.log[prevLogIndex].term
+		}()
+
+		entries := []logEntry{}
+
+		if len(r.log) > logIndexToSend {
+			// We can also send multiple entires at once as a optimization
+			// but first lets make sure sending only one entry at a time works
+			entries = append(entries, r.log[logIndexToSend])
+		}
+
+		appendEntiresConfig = append(
+			appendEntiresConfig,
+			sendAppendEntriesConfig{
+				id: peerId,
+				AppendEntiesArgs: &AppendEntiesArgs{
+					Term:         r.currentTerm,
+					LeaderId:     r.id,
+					PrevLogIndex: prevLogIndex,
+					PrevLogTerm:  prevLogTerm,
+					Entries:      entries,
+					LeaderCommit: r.commitIndex,
+				},
+			},
+		)
+	}
+
+	return &appendEntiresConfig
 }
 
 func (r *Raft) setNewElectionTimer() {

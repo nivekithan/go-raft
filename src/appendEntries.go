@@ -8,8 +8,12 @@ import (
 )
 
 type AppendEntiesArgs struct {
-	Term     int
-	LeaderId int
+	Term         int
+	LeaderId     int
+	PrevLogIndex int
+	PrevLogTerm  int
+	Entries      []logEntry
+	LeaderCommit int
 }
 
 type AppendEntriesReply struct {
@@ -17,7 +21,12 @@ type AppendEntriesReply struct {
 	Success bool
 }
 
-func sendAppendEntiresToAll(peers []int, term int, id int, respond chan<- stateChangeReq, connected bool) {
+type sendAppendEntriesConfig struct {
+	id int
+	*AppendEntiesArgs
+}
+
+func sendAppendEntiresToAll(appendEntriesArgs *[]sendAppendEntriesConfig, term int, respond chan<- stateChangeReq, connected bool) {
 
 	go func() {
 
@@ -27,7 +36,7 @@ func sendAppendEntiresToAll(peers []int, term int, id int, respond chan<- stateC
 
 		// This allows us to not to read from all responses from `indivialResponses` in case
 		// we know already know the result.
-		indivialResponses := make(chan AppendEntriesReply, len(peers))
+		indivialResponses := make(chan AppendEntriesReply, len(*appendEntriesArgs))
 
 		var wg sync.WaitGroup
 
@@ -36,10 +45,10 @@ func sendAppendEntiresToAll(peers []int, term int, id int, respond chan<- stateC
 			close(indivialResponses)
 		}()
 
-		for _, peerId := range peers {
+		for _, appendEntriesArg := range *appendEntriesArgs {
 			wg.Add(1)
-			go func(peerId int) {
-				client, err := rpc.Dial("tcp", fmt.Sprintf(":%d", 9000+peerId))
+			go func(appendEntriesArg sendAppendEntriesConfig) {
+				client, err := rpc.Dial("tcp", fmt.Sprintf(":%d", 9000+appendEntriesArg.id))
 
 				if err != nil {
 					wg.Done()
@@ -48,7 +57,7 @@ func sendAppendEntiresToAll(peers []int, term int, id int, respond chan<- stateC
 
 				defer client.Close()
 				var reply AppendEntriesReply
-				err = client.Call("Raft.AppendEntries", AppendEntiesArgs{Term: term, LeaderId: id}, &reply)
+				err = client.Call("Raft.AppendEntries", appendEntriesArg, &reply)
 
 				if err != nil {
 					wg.Done()
@@ -58,7 +67,7 @@ func sendAppendEntiresToAll(peers []int, term int, id int, respond chan<- stateC
 
 				indivialResponses <- reply
 				wg.Done()
-			}(peerId)
+			}(appendEntriesArg)
 		}
 
 		var response stateChangeReq
