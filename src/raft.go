@@ -250,7 +250,20 @@ func (r *Raft) respondToRequestVoteRpc(args RequestVoteArgs) {
 		r.convertToFollower(args.Term)
 	}
 
-	if r.votedFor == NullId || r.votedFor == args.CandidateId {
+	isCanidateLogUptoDate := func() bool {
+		currentLastLogIndex := r.lastLogIndex()
+		currentLastLogTerm := r.lastLogTerm()
+
+		if currentLastLogTerm != args.LastLogTerm {
+			return args.LastLogTerm > currentLastLogTerm
+		}
+
+		return args.LastLogIndex >= currentLastLogIndex
+	}()
+
+	canNodeVote := r.votedFor == NullId || r.votedFor == args.CandidateId
+
+	if canNodeVote && isCanidateLogUptoDate {
 		r.votedFor = args.CandidateId
 		r.setNewElectionTimer()
 		r.requestVoteRpcReplyChan <- RequestVoteReply{Term: r.currentTerm, VoteGranted: true}
@@ -279,7 +292,6 @@ func (r *Raft) respondToAppendEntriesRpc(args AppendEntiesArgs) {
 
 	if args.PrevLogIndex != -1 {
 		// There are entries to be checked
-
 		if args.PrevLogIndex >= len(r.log) {
 			r.appendEntriesRpcReplyChan <- AppendEntriesReply{Term: r.currentTerm, Success: false}
 			return
@@ -293,11 +305,11 @@ func (r *Raft) respondToAppendEntriesRpc(args AppendEntiesArgs) {
 	}
 
 	for index, entry := range args.Entries {
-		r.log[index] = entry
+		entryIndex := args.PrevLogIndex + index + 1
+		r.log[entryIndex] = entry
 	}
 
 	if args.LeaderCommit > r.commitIndex {
-
 		r.commitIndex = func() int {
 			indexOfLastEntry := len(args.Entries) - 1
 
@@ -329,15 +341,6 @@ func (r *Raft) startElection() {
 	allRequestVoteArgsWithId := []requestVoteArgsWithId{}
 
 	for _, peerId := range r.peers {
-		lastLogIndex := len(r.log) - 1
-
-		lastLogTerm := func() int {
-			if lastLogIndex < 0 {
-				return 0
-			}
-			return r.log[lastLogIndex].term
-		}()
-
 		allRequestVoteArgsWithId = append(
 			allRequestVoteArgsWithId,
 			requestVoteArgsWithId{
@@ -345,8 +348,8 @@ func (r *Raft) startElection() {
 				RequestVoteArgs: &RequestVoteArgs{
 					Term:         r.currentTerm,
 					CandidateId:  r.id,
-					LastLogIndex: len(r.log) - 1,
-					LastLogTerm:  lastLogTerm,
+					LastLogIndex: r.lastLogIndex(),
+					LastLogTerm:  r.lastLogTerm(),
 				},
 			},
 		)
@@ -404,7 +407,7 @@ func (r *Raft) getAppendEntiresConfig() *[]appendEntriesArgsWithId {
 
 		prevLogTerm := func() int {
 			if prevLogIndex < 0 {
-				return 0
+				return -1
 			}
 			return r.log[prevLogIndex].term
 		}()
@@ -487,4 +490,16 @@ func (r *Raft) stopNode() {
 func (r *Raft) Stop() {
 	r.done <- true
 	r.stopServerWg.Wait()
+}
+
+func (r *Raft) lastLogIndex() int {
+	return len(r.log) - 1
+}
+
+func (r *Raft) lastLogTerm() int {
+	if r.lastLogIndex() < 0 {
+		return -1
+	}
+
+	return r.log[r.lastLogIndex()].term
 }
