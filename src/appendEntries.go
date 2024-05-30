@@ -21,12 +21,17 @@ type AppendEntriesReply struct {
 	Success bool
 }
 
-type sendAppendEntriesConfig struct {
+type appendEntriesArgsWithId struct {
 	id int
 	*AppendEntiesArgs
 }
 
-func sendAppendEntiresToAll(appendEntriesArgs *[]sendAppendEntriesConfig, term int, respond chan<- stateChangeReq, connected bool) {
+type appendEntriesReplyWithId struct {
+	id int
+	*AppendEntriesReply
+}
+
+func sendAppendEntiresToAll(appendEntriesArgs *[]appendEntriesArgsWithId, term int, respond chan<- stateChangeReq, connected bool) {
 
 	go func() {
 
@@ -36,7 +41,7 @@ func sendAppendEntiresToAll(appendEntriesArgs *[]sendAppendEntriesConfig, term i
 
 		// This allows us to not to read from all responses from `indivialResponses` in case
 		// we know already know the result.
-		indivialResponses := make(chan AppendEntriesReply, len(*appendEntriesArgs))
+		indivialResponses := make(chan appendEntriesReplyWithId, len(*appendEntriesArgs))
 
 		var wg sync.WaitGroup
 
@@ -47,7 +52,7 @@ func sendAppendEntiresToAll(appendEntriesArgs *[]sendAppendEntriesConfig, term i
 
 		for _, appendEntriesArg := range *appendEntriesArgs {
 			wg.Add(1)
-			go func(appendEntriesArg sendAppendEntriesConfig) {
+			go func(appendEntriesArg appendEntriesArgsWithId) {
 				client, err := rpc.Dial("tcp", fmt.Sprintf(":%d", 9000+appendEntriesArg.id))
 
 				if err != nil {
@@ -65,27 +70,37 @@ func sendAppendEntiresToAll(appendEntriesArgs *[]sendAppendEntriesConfig, term i
 					return
 				}
 
-				indivialResponses <- reply
+				indivialResponses <- appendEntriesReplyWithId{id: appendEntriesArg.id, AppendEntriesReply: &reply}
 				wg.Done()
 			}(appendEntriesArg)
 		}
 
-		var response stateChangeReq
-
 		for reply := range indivialResponses {
 
 			if reply.Term > term {
-				response = stateChangeReq{term: term, newTerm: reply.Term, command: convertToFollower}
-				break
+				timer := time.NewTimer(5 * time.Second)
+				response := &convertToFollower{_term: term, newTerm: reply.Term}
+				select {
+				case respond <- response:
+					return
+				case <-timer.C:
+					return
+				}
+			}
+
+			if !reply.Success {
+				// Decrease nextIndex for this node
+				timer := time.NewTimer(5 * time.Second)
+				response := &decreaseNextIndex{_term: term, id: reply.id}
+
+				select {
+				case respond <- response:
+					continue
+				case <-timer.C:
+					continue
+				}
 			}
 		}
 
-		timer := time.NewTimer(5 * time.Second)
-		select {
-		case respond <- response:
-			return
-		case <-timer.C:
-			return
-		}
 	}()
 }

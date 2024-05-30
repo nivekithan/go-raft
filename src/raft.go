@@ -1,6 +1,7 @@
 package raft
 
 import (
+	"fmt"
 	"log/slog"
 	"net"
 	"os"
@@ -181,16 +182,12 @@ func (r *Raft) startCandidateLoop() {
 			}
 			r.startElection()
 
-		case resFromReqeustVote := <-r.stateChangeChan:
-			if resFromReqeustVote.term != r.currentTerm {
+		case changeState := <-r.stateChangeChan:
+			if changeState.term() != r.currentTerm {
 				continue
 			}
 
-			if resFromReqeustVote.command == convertToFollower {
-				r.convertToFollower(resFromReqeustVote.newTerm)
-			} else if resFromReqeustVote.command == convertToLeader {
-				r.convertToLeader()
-			}
+			changeState.updateState(r)
 
 		case args := <-r.requestVoteRpcArgsChan:
 			r.respondToRequestVoteRpc(args)
@@ -217,15 +214,15 @@ func (r *Raft) startLeaderLoop() {
 
 			r.sendHearbeats()
 
-		case stateChangeReq := <-r.stateChangeChan:
-			if stateChangeReq.term != r.currentTerm {
+		case changeState := <-r.stateChangeChan:
+			r.ilog(fmt.Sprintf("changeState: %v", changeState))
+
+			if changeState.term() != r.currentTerm {
 				// Ignore this request
 				continue
 			}
 
-			if stateChangeReq.command == convertToFollower {
-				r.convertToFollower(stateChangeReq.newTerm)
-			}
+			changeState.updateState(r)
 
 		case args := <-r.requestVoteRpcArgsChan:
 			r.respondToRequestVoteRpc(args)
@@ -292,6 +289,7 @@ func (r *Raft) respondToAppendEntriesRpc(args AppendEntiesArgs) {
 			r.appendEntriesRpcReplyChan <- AppendEntriesReply{Term: r.currentTerm, Success: false}
 			return
 		}
+
 	}
 
 	for index, entry := range args.Entries {
@@ -369,8 +367,8 @@ func (r *Raft) sendHearbeats() {
 
 }
 
-func (r *Raft) getAppendEntiresConfig() *[]sendAppendEntriesConfig {
-	appendEntiresConfig := []sendAppendEntriesConfig{}
+func (r *Raft) getAppendEntiresConfig() *[]appendEntriesArgsWithId {
+	appendEntiresConfig := []appendEntriesArgsWithId{}
 
 	for _, peerId := range r.peers {
 		logIndexToSend := r.nextIndex[peerId]
@@ -393,7 +391,7 @@ func (r *Raft) getAppendEntiresConfig() *[]sendAppendEntriesConfig {
 
 		appendEntiresConfig = append(
 			appendEntiresConfig,
-			sendAppendEntriesConfig{
+			appendEntriesArgsWithId{
 				id: peerId,
 				AppendEntiesArgs: &AppendEntiesArgs{
 					Term:         r.currentTerm,

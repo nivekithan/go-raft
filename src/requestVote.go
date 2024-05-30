@@ -75,16 +75,20 @@ func requestVoteFromAll(peers []int, term int, id int, respond chan<- stateChang
 			}
 
 			if reply.Term > term {
-				response = stateChangeReq{term: term, command: convertToFollower, newTerm: reply.Term}
+				response = &convertToFollower{_term: term, newTerm: reply.Term}
 				break
 			}
 
 			isWonELection := totalVotes > (len(peers)+1)/2
 
 			if isWonELection {
-				response = stateChangeReq{term: term, command: convertToLeader}
+				response = &convertToLeader{_term: term}
 				break
 			}
+		}
+
+		if response == nil {
+			return
 		}
 
 		timer := time.NewTimer(5 * time.Second)
