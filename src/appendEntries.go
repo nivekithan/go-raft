@@ -62,7 +62,7 @@ func sendAppendEntiresToAll(appendEntriesArgs *[]appendEntriesArgsWithId, term i
 
 				defer client.Close()
 				var reply AppendEntriesReply
-				err = client.Call("Raft.AppendEntries", appendEntriesArg, &reply)
+				err = client.Call("Raft.AppendEntries", appendEntriesArg.AppendEntiesArgs, &reply)
 
 				if err != nil {
 					wg.Done()

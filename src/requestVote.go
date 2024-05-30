@@ -8,8 +8,10 @@ import (
 )
 
 type RequestVoteArgs struct {
-	Term        int
-	CandidateId int
+	Term         int
+	CandidateId  int
+	LastLogIndex int
+	LastLogTerm  int
 }
 
 type RequestVoteReply struct {
@@ -17,7 +19,12 @@ type RequestVoteReply struct {
 	VoteGranted bool
 }
 
-func requestVoteFromAll(peers []int, term int, id int, respond chan<- stateChangeReq, connected bool) {
+type requestVoteArgsWithId struct {
+	id int
+	*RequestVoteArgs
+}
+
+func requestVoteFromAll(allRequestVoteArgsWithId []requestVoteArgsWithId, term int, respond chan<- stateChangeReq, connected bool) {
 
 	if !connected {
 		fmt.Println("Not sending requestVoteFromAll since we are not connected")
@@ -27,7 +34,7 @@ func requestVoteFromAll(peers []int, term int, id int, respond chan<- stateChang
 	go func() {
 		// This allows us to not to read from all responses from `indivialResponses` in case
 		// we know already know the result or the server got shutdown
-		indivialResponses := make(chan RequestVoteReply, len(peers))
+		indivialResponses := make(chan RequestVoteReply, len(allRequestVoteArgsWithId))
 
 		var wg sync.WaitGroup
 
@@ -36,39 +43,37 @@ func requestVoteFromAll(peers []int, term int, id int, respond chan<- stateChang
 			close(indivialResponses)
 		}()
 
-		for _, peerId := range peers {
+		for _, requestVoteArg := range allRequestVoteArgsWithId {
 			wg.Add(1)
-			go func(peerId int) {
+			go func(requestVoteArg requestVoteArgsWithId) {
 				defer wg.Done()
-				client, err := rpc.Dial("tcp", fmt.Sprintf(":%d", 9000+peerId))
-
-				defer client.Close()
+				client, err := rpc.Dial("tcp", fmt.Sprintf(":%d", 9000+requestVoteArg.id))
 
 				if err != nil {
-
 					return
 				}
 
+				defer client.Close()
+
 				var reply RequestVoteReply
-				err = client.Call("Raft.RequestVote", RequestVoteArgs{Term: term, CandidateId: id}, &reply)
+				err = client.Call("Raft.RequestVote", requestVoteArg.RequestVoteArgs, &reply)
 
 				if err != nil {
+					fmt.Printf(err.Error())
 					// Ignore this request
 					return
 				}
 
 				indivialResponses <- reply
 
-			}(peerId)
+			}(requestVoteArg)
 		}
 
 		totalVotes := 1 // We have voted for ourveles already
-		responsesRecived := 0
 
 		var response stateChangeReq
 
 		for reply := range indivialResponses {
-			responsesRecived++
 
 			if reply.VoteGranted {
 				totalVotes++
@@ -79,7 +84,7 @@ func requestVoteFromAll(peers []int, term int, id int, respond chan<- stateChang
 				break
 			}
 
-			isWonELection := totalVotes > (len(peers)+1)/2
+			isWonELection := totalVotes > (len(allRequestVoteArgsWithId)+1)/2
 
 			if isWonELection {
 				response = &convertToLeader{_term: term}

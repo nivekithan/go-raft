@@ -102,7 +102,7 @@ func NewRaft(config RaftConfig) *Raft {
 		l: slog.New(
 			slog.NewTextHandler(
 				os.Stdout,
-				&slog.HandlerOptions{Level: slog.LevelInfo},
+				&slog.HandlerOptions{Level: slog.LevelDebug},
 			),
 		).With("id", config.Id),
 
@@ -326,8 +326,36 @@ func (r *Raft) startElection() {
 	r.votedFor = r.id
 	r.state = Candidate
 
+	allRequestVoteArgsWithId := []requestVoteArgsWithId{}
+
+	for _, peerId := range r.peers {
+		lastLogIndex := len(r.log) - 1
+
+		lastLogTerm := func() int {
+			if lastLogIndex < 0 {
+				return 0
+			}
+			return r.log[lastLogIndex].term
+		}()
+
+		allRequestVoteArgsWithId = append(
+			allRequestVoteArgsWithId,
+			requestVoteArgsWithId{
+				id: peerId,
+				RequestVoteArgs: &RequestVoteArgs{
+					Term:         r.currentTerm,
+					CandidateId:  r.id,
+					LastLogIndex: len(r.log) - 1,
+					LastLogTerm:  lastLogTerm,
+				},
+			},
+		)
+	}
+
 	r.dlog("Sending requestVoteFromAll")
-	requestVoteFromAll(r.peers, r.currentTerm, r.id, r.stateChangeChan, r.connected)
+
+	requestVoteFromAll(allRequestVoteArgsWithId, r.currentTerm, r.stateChangeChan, r.connected)
+
 	r.setNewElectionTimer()
 }
 
