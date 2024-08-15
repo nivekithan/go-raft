@@ -5,3 +5,7 @@ Implementation of raft algorithm using go with minimal mutexes. I have used [P-l
 This is the repo which contains the code for models I have created using P-lang
 
 https://github.com/nivekithan/p-models
+
+### Original Paper 
+
+https://raft.github.io/raft.pdf
